@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Generated Gsim data and backtest workspaces.
+dm_data/
+workspace*/
+
+# Local runtime logs and temporary outputs.
+*.log
+.DS_Store
+

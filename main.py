@@ -75,10 +75,8 @@ def build_xml_all():
   <Universe startdate="{ProjectConfig.START_DATE}" enddate="{ProjectConfig.END_DATE}" secID="/datasvc/rawdata/secID" holidaysfile="/datasvc/rawdata/holidays" calendarfile="/datasvc/rawdata/wind_calendar.csv"/>
 
   <Modules>
-    <Data id="FULL" module="/usr/local/gsim/gsim/data/module/umgr_full.py" path="" niomapprivate="true"/>
     <Data id="ALL" module="UmgrAll" path="" niomapprivate="true"/>
     <Data id="ALL_TRD" module="UmgrTrd" path="" niomapprivate="true"/>
-    <Data id="ALL_GIM" module="/usr/local/gsim/gsim/data/module/umgr_gim.py" path="" niomapprivate="true"/>
 
     <Data id="HS300" module="/usr/local/gsim/source_ref/umgr_index.py" dataPath="/datasvc/rawdata/HS300/" niomapprivate="true"/>
     <Data id="ZZ500" module="/usr/local/gsim/source_ref/umgr_index.py" dataPath="/datasvc/rawdata/ZZ500/" niomapprivate="true"/>
