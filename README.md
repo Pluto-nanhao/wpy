@@ -1,82 +1,421 @@
 # wpy sector rotation backtest
 
-This repository contains a Gsim-based A-share sector rotation factor framework. It converts stock-level Datayes/Tonglian `equ_fancy_factors_table1-10` factors into sector-level factor matrices, then backtests each sector factor and ranks results by Sharpe.
+`wpy` is a Gsim-based A-share sector rotation factor framework. It converts stock-level Datayes/Tonglian `equ_fancy_factors_table1-10` factors into sector-level factor matrices, runs each sector factor as a Gsim Alpha, and ranks the resulting PnL by Sharpe.
 
-## What It Does
+This top-level README is intentionally detailed for the GitHub project page. It folds in the handoff notes from `docs/项目交接说明.md` and the data policy from `docs/DATA.md`, so the repository can be understood from the landing page alone.
 
-1. Defines 208 raw factors from `equ_fancy_factors_table1-10` in `config.py`.
-2. Aggregates stock-level factor values to sector-level signals through either:
-   - equal-weight aggregation with winsorization and standardization; or
-   - market-cap-weighted aggregation with configurable cap handling.
-3. Writes generated sector factor matrices as `.npy` files under `dm_data/`.
-4. Builds a Gsim XML config and runs all factors as Alpha modules.
-5. Parses PnL summaries and writes factor rankings to each workspace's `results/factor_ranking.csv`.
+## Project Scope
 
-## Main Files
+The project was originally a table1-only sector factor backtest. It has been expanded to cover `equ_fancy_factors_table1` through `equ_fancy_factors_table10`, for 208 raw factors in total.
+
+The core workflow is:
+
+1. Define all table1-10 factor names in `config.py`.
+2. Load stock-level factors from `/datasvc/rawdata/equ_fancy_factors_table{1-10}`.
+3. Aggregate stock-level values into sector-level matrices.
+4. Store generated sector matrices as `.npy` files under `dm_data/`.
+5. Build the current Gsim XML template as `workspace_*/configs/cfg_all_factors.xml`.
+6. Run all factors as Alpha modules in one Gsim portfolio.
+7. Parse each PnL through `simsummary.py`.
+8. Write `results/factor_ranking.csv`, sorted by Sharpe.
+
+## Repository Layout
 
 | Path | Purpose |
 | --- | --- |
-| `config.py` | Project config, date range, Gsim paths, and full table1-10 factor list. |
-| `main.py` | Builds Gsim XML, runs backtests, parses summaries, and ranks factors. |
-| `alpha_kchi.py` | Alpha module that reads precomputed `.npy` matrices and emits prior-day signal values. |
+| `config.py` | Project configuration, date range, Gsim paths, `TABLE_FACTORS`, `ALPHA_LIST`, and `FACTOR_TABLE_LIST`. |
+| `main.py` | Main equal-weight pipeline: initialize workspace, build XML, run Gsim, parse summaries, and rank factors. |
+| `alpha_kchi.py` | Gsim Alpha module that reads precomputed `.npy` sector matrices and emits prior-day signal values. |
 | `dmgr_scripts/Dmgr_tlsector_eq.py` | Equal-weight sector factor generator. |
-| `dmgr_scripts/Dmgr_tlsector_cap.py` | Market-cap-weighted sector factor generator. |
-| `run_table1_cap_trial.py` | Table1-only cap aggregation experiments. |
-| `run_alltables_cap_trial.py` | Full table1-10 cap aggregation experiments. |
-| `run_alltables_cap_stats_v5.py` | Full table1-10 cap experiments with `StatsSimpleV5` modes. |
-| `run_combo_stats_v5.py` | Backtests a combined factor matrix. |
-| `docs/项目交接说明.md` | Original handoff notes and experiment conclusions. |
-| `docs/DATA.md` | Data inventory and storage policy. |
+| `dmgr_scripts/Dmgr_tlsector_cap.py` | Market-cap-weighted sector factor generator with configurable cap weighting and missing-value handling. |
+| `run_table1_cap_trial.py` | Table1-only cap aggregation experiment runner. |
+| `run_alltables_cap_trial.py` | Full table1-10 cap aggregation experiment runner. |
+| `run_alltables_cap_stats_v5.py` | Full table1-10 cap experiments using `StatsSimpleV5` modes. |
+| `run_combo_stats_v5.py` | Backtests a combined `combo.npy` factor matrix with `StatsSimpleV5`. |
+| `docs/项目交接说明.md` | Historical handoff notes, implementation details, and experiment conclusions. |
+| `docs/DATA.md` | Raw-data inventory, generated-data policy, and rebuild policy. |
 
-## Requirements
+Generated directories such as `dm_data/`, `workspace_eq/`, `workspace_cap_t1_*/`, `workspace_cap_all_*/`, and `workspace_combo_*/` are intentionally excluded from Git because they contain large local caches, logs, PnL files, and reproducible outputs.
 
-This project is tied to an internal Gsim environment and raw data layout:
+## Environment Requirements
 
-- Python runtime: `/usr/local/gsim/.venv/bin/python`
-- Gsim runner: `/usr/local/gsim/run.py`
-- Summary tool: `/usr/local/gsim/tools/simsummary.py`
-- Raw factor data: `/datasvc/rawdata/equ_fancy_factors_table{1-10}`
-- Market and universe data under `/datasvc/rawdata/` and `/datasvc/data/cc/`
+This repository is tied to an internal Gsim/data layout. The source code is portable, but successful execution requires the same local runtime and raw data paths.
 
-The repository stores code and documentation only. Generated `.npy` factor matrices and workspace outputs are intentionally ignored because they are large and environment-specific.
+| Dependency | Expected Location |
+| --- | --- |
+| Python runtime | `/usr/local/gsim/.venv/bin/python` |
+| Gsim runner | `/usr/local/gsim/run.py` |
+| Summary tool | `/usr/local/gsim/tools/simsummary.py` |
+| Raw factor tables | `/datasvc/rawdata/equ_fancy_factors_table{1-10}` |
+| Sector classification | `/datasvc/rawdata/AShareWindIndustry/`, loaded through `Basedata` |
+| Trading universe | Gsim `ALL_TRD` |
+| Market cap | Gsim `cap` data |
+| Index returns | `/datasvc/rawdata/aindexeodprices/` |
+| Calendar and security IDs | `/datasvc/rawdata/wind_calendar.csv`, `/datasvc/rawdata/secID` |
+| NIO data root | `/datasvc/data/cc/` |
 
-## Run
+The configured backtest date range is `20110101` to `20251231`.
 
-Equal-weight baseline:
+## Factor Universe
+
+`config.py` owns the factor universe:
+
+- `TABLE_FACTORS`: mapping from table id to factor names.
+- `ALPHA_LIST`: generated Alpha ids such as `t1_APB_SKEW` and `t9_GTRA_SELL_PCT_VOL`.
+- `FACTOR_TABLE_LIST`: generated `(table_num, factor_name)` tuples used by the Dmgr scripts.
+
+Current count: 208 factors across table1-10.
+
+To add or remove factors, edit only `TABLE_FACTORS`. `ALPHA_LIST` and `FACTOR_TABLE_LIST` are derived automatically.
+
+## Current XML Template
+
+The current XML template is generated by `main.py::build_xml_all()` and written to each workspace as:
+
+```text
+workspace_*/configs/cfg_all_factors.xml
+```
+
+The template is not committed as a source artifact because it contains local absolute paths and is reproducible from code.
+
+### XML Header
+
+The XML root is `<gsim>`. The generated template defines:
+
+- `<Constants backdays="256" niodatapath="/datasvc/data/cc/" niomapprivate="true" authorWeight="{AUTHOR}:1.0," time_intensive="false"/>`
+- `<Universe startdate="{START_DATE}" enddate="{END_DATE}" secID="/datasvc/rawdata/secID" holidaysfile="/datasvc/rawdata/holidays" calendarfile="/datasvc/rawdata/wind_calendar.csv"/>`
+
+### XML Modules
+
+The generated `<Modules>` block registers:
+
+| Module id | Purpose |
+| --- | --- |
+| `ALL` | Full Gsim universe manager through `UmgrAll`. |
+| `ALL_TRD` | Tradable universe through `UmgrTrd`; all Alpha blocks use this as `universeId`. |
+| `HS300`, `ZZ500`, `ZZ1000` | Index universe modules. |
+| `aindexeodprices` | Index return data, used by `StatsSimpleV5` mode 1. |
+| `equ_fancy_factors_table1` ... `equ_fancy_factors_table10` | Raw Datayes/Tonglian factor tables. |
+| `Basedata` | Raw price, industry classification, and ST data. |
+| `ipo`, `PriceLimit`, `adjfactor`, `ashareeodprices`, `adjprice`, `AShareMoneyFlow` | Supporting market data modules. |
+| `{AUTHOR}_{USED_SCRIPT}` | Custom sector-factor Dmgr, either equal-weight or cap-weighted depending on `USED_SCRIPT`. |
+| `AlphaMod` | Alpha implementation loaded from `alpha_kchi.py`. |
+
+For table modules, the template uses:
+
+```xml
+<Data id="equ_fancy_factors_table{i}"
+      module="/usr/local/gsim/source_ref/Dmgr_equ_fancy_factors_table{i}.py"
+      dataPath="/datasvc/rawdata/equ_fancy_factors_table{i}"
+      niomapprivate="true"/>
+```
+
+### XML Portfolio and Stats
+
+The generated portfolio is:
+
+```xml
+<Portfolio id="MyPort" booksize="20e6" homecurrency="CNY">
+  ...
+</Portfolio>
+```
+
+Stats are selected through `ProjectConfig`:
+
+| Config | Meaning |
+| --- | --- |
+| `STATS_MODULE = "StatsSimple"` | Traditional long-short stats. |
+| `STATS_MODULE = "StatsSimpleV5"` | Newer stats module with mode support. |
+| `STATS_MODE = 0` | Long-short mode. |
+| `STATS_MODE = 1` | Benchmark-relative excess mode, using `STATS_INDEX_RET_FIELD`. |
+| `STATS_MODE = 2` | Top10 long-short mode. |
+| `STATS_THRES = 90` | Optional threshold parameter included for `StatsSimpleV5` when not `None`. |
+
+For `StatsSimpleV5`, the generated Stats line includes:
+
+```xml
+<Stats module="StatsSimpleV5"
+       mode="{STATS_MODE}"
+       index_ret="aindexeodprices.s_dq_pctchange_000852"
+       thres="90"
+       tradePrice="close"
+       tax="0."
+       fee="0."
+       slippage="0."
+       printStats="true"
+       dumpPnl="true"
+       pnlDir="{workspace}/pnls"/>
+```
+
+### XML Alpha Blocks
+
+For every id in `ALPHA_LIST`, the XML contains one Alpha block:
+
+```xml
+<Alpha id="{alpha_id}"
+       module="AlphaMod"
+       npydata="{DATA_ROOT}/{AUTHOR}_{USED_SCRIPT}/{AUTHOR}_{USED_SCRIPT}.tl_{alpha_id_lower}.npy"
+       universeId="ALL_TRD"
+       booksize="20e6"
+       delay="1"
+       ndays="20"
+       dumpAlphaFile="false"
+       dumpAlphaDir="alpha"
+       st="20">
+  <Description name="{alpha_id}" author="{AUTHOR}" birthday="20240101" category="factor" universe="ALL_TRD" delay="1"/>
+  <Operations>
+    <Operation module="AlphaOpPower" exp="1.0"/>
+  </Operations>
+</Alpha>
+```
+
+## Equal-Weight Pipeline
+
+The equal-weight baseline uses `Dmgr_tlsector_eq.py`.
+
+Run:
 
 ```bash
 cd /mnt/storage/work/hwang/wpy
 python3 main.py
 ```
 
-Full-table market-cap aggregation trials:
+Flow:
+
+1. `init_env()` creates `configs/`, `logs/`, `pnls/`, and `results/` under `workspace_eq/`.
+2. `build_xml_all()` generates `workspace_eq/configs/cfg_all_factors.xml`.
+3. `run_gsim()` runs `/usr/local/gsim/run.py` and mirrors output to both terminal and `workspace_eq/logs/gsim_all.log`.
+4. `run_summaries_and_sort()` calls `simsummary.py` for every PnL file and writes `workspace_eq/results/factor_ranking.csv`.
+
+To rebuild only the ranking file without rerunning Gsim:
+
+```python
+from main import run_summaries_and_sort
+run_summaries_and_sort()
+```
+
+## Cap-Weighted Aggregation
+
+The cap-weighted pipeline uses `dmgr_scripts/Dmgr_tlsector_cap.py`.
+
+It supports three controls:
+
+| Control | Values | Meaning |
+| --- | --- | --- |
+| `CAP_WEIGHT_MODE` | `cap_pct`, `softmax` | Direct cap share weighting or softmax-transformed cap weighting inside each sector. |
+| `CAP_NAN_MODE` | `drop`, `fill_sector_mean` | Drop missing-cap stocks or fill with sector/day mean with market/day fallback. |
+| `CAP_TRANSFORM` | `none`, `log1p` | Optional `log(1 + cap)` transform before calculating weights. |
+
+The runner scripts set these environment variables automatically.
+
+### Table1 Experiments
+
+Single examples:
+
+```bash
+python3 run_table1_cap_trial.py --weight cap_pct --nan drop
+python3 run_table1_cap_trial.py --weight softmax --nan fill_sector_mean
+python3 run_table1_cap_trial.py --weight softmax --nan fill_sector_mean --cap-transform log1p
+```
+
+All combinations:
+
+```bash
+python3 run_table1_cap_trial.py --all
+```
+
+The `--all` mode covers `2 x 2 x 2 = 8` combinations:
+
+- `cap_pct` or `softmax`
+- `drop` or `fill_sector_mean`
+- `none` or `log1p`
+
+Each run writes to an isolated workspace such as:
+
+- `workspace_cap_t1_cap_pct_drop_none/`
+- `workspace_cap_t1_cap_pct_fill_sector_mean_log1p/`
+- `workspace_cap_t1_softmax_fill_sector_mean_none/`
+
+Ranking output:
+
+```text
+workspace_cap_t1_*/results/factor_ranking.csv
+```
+
+### Table1 Experiment Findings
+
+The handoff notes compared three representative table1 settings:
+
+| Strategy | Mean Sharpe | Median Sharpe | Top5 Mean | Top10 Mean | Positive Sharpe Count |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `cap_pct + drop` | 0.2415 | 0.1300 | 0.6820 | 0.4500 | 17 |
+| `softmax + fill_sector_mean` | 0.3830 | 0.3700 | 0.6880 | 0.5970 | 19 |
+| `log1p(cap) -> cap_pct + fill_sector_mean` | 0.1840 | 0.1500 | 0.6260 | 0.4400 | 14 |
+
+Interpretation:
+
+- `cap_pct + drop` is driven by a smaller number of strong factors, especially `t1_CORR_VP`.
+- `softmax + fill_sector_mean` has the best overall distribution and improves many `NP/REV` factors.
+- `log1p(cap) -> cap_pct + fill_sector_mean` reduces large-cap concentration but hurt the overall Sharpe distribution in the table1 trial.
+
+Recommendation from the handoff:
+
+1. Prefer `softmax + fill_sector_mean` if the goal is broad positive-Sharpe coverage and best aggregate distribution.
+2. Keep `cap_pct + drop` as a comparison baseline if the priority is preserving strong head factors such as `CORR_VP`.
+3. Treat the `log1p` direct-weighting variant as a risk-control alternative rather than the default.
+
+Note: one historical output had a malformed first-row `factor_id` for `t1_CORR_VP`; it did not change the main comparison, but future output cleanup should normalize factor ids.
+
+### Full Table1-10 Cap Experiments
+
+Run all built-in full-table strategies:
 
 ```bash
 python3 run_alltables_cap_trial.py --all
 ```
 
-Full-table trials with `StatsSimpleV5` modes:
+Run one strategy:
+
+```bash
+python3 run_alltables_cap_trial.py --strategy cap_pct_drop
+python3 run_alltables_cap_trial.py --strategy softmax_fill
+python3 run_alltables_cap_trial.py --strategy log1p_cap_pct_fill
+```
+
+Built-in strategy names:
+
+| Strategy | Meaning |
+| --- | --- |
+| `cap_pct_drop` | Direct cap share weighting, drop missing-cap stocks. |
+| `softmax_fill` | Softmax cap weighting, fill missing cap by sector/day mean. |
+| `log1p_cap_pct_fill` | `log1p(cap)` then direct cap share weighting, fill missing cap. |
+
+Each strategy uses a separate `AUTHOR`, cache directory, and workspace:
+
+- `workspace_cap_all_cap_pct_drop/`
+- `workspace_cap_all_softmax_fill/`
+- `workspace_cap_all_log1p_cap_pct_fill/`
+
+Ranking output:
+
+```text
+workspace_cap_all_*/results/factor_ranking.csv
+```
+
+## StatsSimpleV5 Runner
+
+`run_alltables_cap_stats_v5.py` runs the same full-table cap strategies with `StatsSimpleV5`.
+
+Run all strategies and all modes:
 
 ```bash
 python3 run_alltables_cap_stats_v5.py --all
 ```
 
-Single strategy and mode:
+Run one strategy/mode:
 
 ```bash
 python3 run_alltables_cap_stats_v5.py --strategy softmax_fill --mode 0
 ```
 
-## Output
+Mode meanings:
 
-Each run creates a workspace such as `workspace_eq/` or `workspace_cap_all_softmax_fill_m0/` with:
+| Mode | Meaning |
+| ---: | --- |
+| 0 | Long-short. |
+| 1 | Excess return relative to `aindexeodprices.s_dq_pctchange_000852`. |
+| 2 | Top10 long-short. |
 
-- `configs/`: generated XML files.
-- `logs/`: Gsim logs.
-- `pnls/`: per-factor PnL files.
-- `results/factor_ranking.csv`: factor ranking by Sharpe.
+## Combo Backtest
 
-## Current Notes
+`run_combo_stats_v5.py` backtests one combined factor matrix with `StatsSimpleV5`.
 
-The handoff notes report that, in table1 experiments, `softmax + fill_sector_mean` had the best overall Sharpe distribution. Full table1-10 cap experiments are scaffolded through `run_alltables_cap_trial.py` and `run_alltables_cap_stats_v5.py`.
+Default input:
 
+```text
+/home/wangpy/sectorfeature/sectorfeature/dm_data/kchi_all_log1p_cap_pct_fill_tlsector_cap/combo.npy
+```
+
+Run all modes:
+
+```bash
+python3 run_combo_stats_v5.py --all
+```
+
+Run one mode or pass a custom matrix:
+
+```bash
+python3 run_combo_stats_v5.py --mode 1
+python3 run_combo_stats_v5.py --mode 1 --combo-npy /path/to/combo.npy
+```
+
+Outputs are written under `workspace_combo_log1p_cap_pct_fill_m{mode}/`.
+
+## Output Files
+
+Every main run creates a workspace with:
+
+| Directory/File | Contents |
+| --- | --- |
+| `configs/` | Generated Gsim XML configs such as `cfg_all_factors.xml` or `cfg_combo.xml`. |
+| `logs/` | Gsim runtime logs. |
+| `pnls/` | Per-factor or combo PnL files dumped by Gsim. |
+| `results/factor_ranking.csv` | Ranked factor summary for multi-factor runs. |
+| `results/combo_summary.csv` | Raw simsummary output for combo runs. |
+
+`factor_ranking.csv` columns:
+
+| Column | Meaning |
+| --- | --- |
+| `factor_id` | Alpha id, for example `t1_CORR_VP` or `t9_GTRA_SELL_PCT_VOL`. |
+| `sharpe` | Sharpe ratio parsed from `shrp(IR)`. |
+| `ret_pct` | Annualized return percentage from simsummary. |
+| `pnl_M` | Cumulative PnL in millions. |
+| `max_dd` | Maximum drawdown percentage. |
+| `win_rate` | Win rate. |
+
+## simsummary Parsing Note
+
+The project handles a known `simsummary.py` formatting issue around the `shrp(IR)` column:
+
+- Positive values may be printed with a space, for example `0.30( 0.02)`.
+- Negative values may be printed without a space, for example `-0.92(-0.06)`.
+
+Because the token count can differ, `main.py` does not rely on fixed positions for Sharpe. It searches for the token containing `(` and extracts the numeric prefix. Drawdown and win rate are parsed from the right side of the row to avoid column-shift errors.
+
+## Data and Git Policy
+
+This repository stores source code and documentation. It does not store generated matrices or backtest outputs.
+
+| Path Pattern | Contents | Git Policy |
+| --- | --- | --- |
+| `dm_data/` | Generated sector factor `.npy` matrices. | Ignored. Large binary cache. |
+| `workspace_eq/` | Equal-weight baseline configs, logs, PnL files, and rankings. | Ignored. Reproducible output. |
+| `workspace_cap_t1_*/` | Table1 cap experiment outputs. | Ignored. Reproducible output. |
+| `workspace_cap_all_*/` | Full table1-10 cap experiment outputs. | Ignored. Reproducible output. |
+| `workspace_combo_*/` | Combined-factor backtest outputs. | Ignored. Reproducible output. |
+
+The local cache `dm_data/kchi_cap_pct_drop_none_tlsector_cap/` has historically contained 208 `.npy` files, with many files around 171 MB each. Committing them directly would make the GitHub repository impractical. If generated artifacts need to be shared, use a separate artifact store or Git LFS after confirming quota and access policy.
+
+## Rebuild Commands
+
+Common rebuild commands:
+
+```bash
+python3 main.py
+python3 run_table1_cap_trial.py --all
+python3 run_alltables_cap_trial.py --all
+python3 run_alltables_cap_stats_v5.py --all
+python3 run_combo_stats_v5.py --all
+```
+
+## Maintenance Checklist
+
+When updating the project:
+
+1. Update `TABLE_FACTORS` in `config.py` for factor additions/removals.
+2. Keep XML behavior in `main.py::build_xml_all()` documented in this README.
+3. Do not commit generated XML from `workspace_*/configs/` unless there is a deliberate fixture/test reason.
+4. Keep raw-data path assumptions in the Environment Requirements section current.
+5. Recheck `run_summaries_and_sort()` if the Gsim `simsummary.py` output format changes.
+6. Keep large generated `.npy`, PnL, and log outputs out of normal Git history.
